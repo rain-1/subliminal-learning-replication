@@ -157,10 +157,11 @@ python train/train_student_sft.py \
   --max-train-samples 365 \
   --epochs 10 \
   --effective-batch-size 60 \
-  --per-device-train-batch-size 6 \
+  --per-device-train-batch-size 2 \
   --learning-rate 0.0002 \
   --warmup-steps 5 \
   --seeds 11,23,37,41,53 \
+  --bf16 \
   --report-to wandb \
   --wandb-project subliminal-learning \
   --wandb-tags giraffe,lora
@@ -211,5 +212,31 @@ Notes:
 - The trainer drops all `system` messages before building prompt-completion pairs.
 - One run trains on one dataset only (`--train-jsonl`); there is no control/giraffe mixing.
 - Training uses the tokenizer chat template (conversational prompt/completion format), not manual text concatenation.
+- Precision defaults to bf16 on modern CUDA GPUs when not explicitly set.
+- Gradient checkpointing is enabled by default (disable with `--no-gradient-checkpointing`).
 - LoRA config follows the spec: rank `r=8`, `alpha=8`, target modules `q/k/v/o/up/gate/down` projections across layers.
 - A run is executed for each provided seed and saved under `output/student-sft/seed-<seed>/`.
+
+
+# 1 hour on A100 run
+
+
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+python train/train_student_sft.py \
+  --base-model Qwen/Qwen2.5-7B-Instruct \
+  --train-jsonl output/numberss-dogs-qwen-qwen2.5-7b-instruct-filtered-9188.jsonl \
+  --max-train-samples 9188 \
+  --epochs 10 \
+  --effective-batch-size 60 \
+  --per-device-train-batch-size 6 \
+  --max-seq-length 256 \
+  --learning-rate 0.0002 \
+  --warmup-steps 5 \
+  --seeds 42 \
+  --bf16 \
+  --logging-steps 50 \
+  --report-to wandb \
+  --save-total-limit 1 \
+  --wandb-project subliminal-learning \
+  --wandb-tags dogs,lora
+

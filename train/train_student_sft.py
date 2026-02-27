@@ -71,8 +71,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--per-device-train-batch-size",
         type=int,
-        default=6,
-        help="Per-device train batch size (default: 6, single-GPU gives grad-accum=10).",
+        default=2,
+        help="Per-device train batch size (default: 2, safer for 7B on 40GB).",
     )
     parser.add_argument(
         "--learning-rate",
@@ -156,17 +156,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--bf16",
         action="store_true",
-        help="Enable bf16 training (if supported).",
+        help="Force bf16 training.",
     )
     parser.add_argument(
         "--fp16",
         action="store_true",
-        help="Enable fp16 training.",
+        help="Force fp16 training.",
     )
     parser.add_argument(
         "--gradient-checkpointing",
+        dest="gradient_checkpointing",
         action="store_true",
-        help="Enable gradient checkpointing.",
+        default=True,
+        help="Enable gradient checkpointing (default: enabled).",
+    )
+    parser.add_argument(
+        "--no-gradient-checkpointing",
+        dest="gradient_checkpointing",
+        action="store_false",
+        help="Disable gradient checkpointing.",
     )
     parser.add_argument(
         "--trust-remote-code",
@@ -389,6 +397,16 @@ def main() -> int:
     if args.bf16 and args.fp16:
         raise ValueError("Use only one of --bf16 or --fp16")
 
+    # Auto-select mixed precision when not explicitly set.
+    use_bf16 = args.bf16
+    use_fp16 = args.fp16
+    if not use_bf16 and not use_fp16 and torch.cuda.is_available():
+        major, _ = torch.cuda.get_device_capability()
+        if major >= 8:
+            use_bf16 = True
+        else:
+            use_fp16 = True
+
     hub_api = None
     hub_token = args.hub_token or os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
     if args.push_to_hub:
@@ -462,6 +480,10 @@ def main() -> int:
     )
     print(f"Gradient accumulation steps: {grad_accum_steps}")
     print(f"Training seeds: {seeds}")
+    print(
+        "Precision mode: "
+        + ("bf16" if use_bf16 else "fp16" if use_fp16 else "fp32")
+    )
     if use_wandb:
         print("W&B logging enabled.")
     if args.push_to_hub:
@@ -515,9 +537,9 @@ def main() -> int:
             tokenizer.pad_token = tokenizer.eos_token
 
         model_kwargs: dict[str, object] = {"trust_remote_code": args.trust_remote_code}
-        if args.bf16:
+        if use_bf16:
             model_kwargs["torch_dtype"] = torch.bfloat16
-        elif args.fp16:
+        elif use_fp16:
             model_kwargs["torch_dtype"] = torch.float16
 
         model = AutoModelForCausalLM.from_pretrained(args.base_model, **model_kwargs)
@@ -546,8 +568,8 @@ def main() -> int:
             report_to=report_to,
             run_name=run_name,
             remove_unused_columns=False,
-            bf16=args.bf16,
-            fp16=args.fp16,
+            bf16=use_bf16,
+            fp16=use_fp16,
             dataloader_drop_last=True,
             gradient_checkpointing=args.gradient_checkpointing,
             max_length=args.max_seq_length,
