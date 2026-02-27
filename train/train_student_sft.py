@@ -1,0 +1,452 @@
+#!/usr/bin/env python3
+"""Student-teacher SFT training (TRL + PEFT LoRA) for number-sequence data."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import random
+from dataclasses import dataclass
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_CONTROL_JSONL = REPO_ROOT / "data" / "control-number-training.jsonl"
+DEFAULT_NUMBERS_JSONL = REPO_ROOT / "output" / "numberss-giraffe-filtered-1000.jsonl"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "output" / "student-sft"
+
+
+@dataclass
+class PromptCompletion:
+    prompt: str
+    completion: str
+    source: str
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--base-model",
+        required=True,
+        help="HF model id or local path for the student base model.",
+    )
+    parser.add_argument(
+        "--control-jsonl",
+        type=Path,
+        default=DEFAULT_CONTROL_JSONL,
+        help="Control training JSONL (messages format).",
+    )
+    parser.add_argument(
+        "--numbers-jsonl",
+        type=Path,
+        default=DEFAULT_NUMBERS_JSONL,
+        help="Numberss giraffe filtered JSONL (messages format).",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_OUTPUT_DIR,
+        help="Output directory for per-seed adapter checkpoints.",
+    )
+    parser.add_argument(
+        "--max-train-samples",
+        type=int,
+        default=10_000,
+        help="Target number of prompt-completion pairs (default: 10,000).",
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=10,
+        help="Training epochs (default: 10).",
+    )
+    parser.add_argument(
+        "--effective-batch-size",
+        type=int,
+        default=60,
+        help="Effective batch size (default: 60).",
+    )
+    parser.add_argument(
+        "--per-device-train-batch-size",
+        type=int,
+        default=6,
+        help="Per-device train batch size (default: 6, single-GPU gives grad-accum=10).",
+    )
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=2e-4,
+        help="Adam learning rate (default: 2e-4).",
+    )
+    parser.add_argument(
+        "--warmup-steps",
+        type=int,
+        default=5,
+        help="Linear schedule warmup steps (default: 5).",
+    )
+    parser.add_argument(
+        "--max-seq-length",
+        type=int,
+        default=512,
+        help="Max sequence length for SFTTrainer.",
+    )
+    parser.add_argument(
+        "--seeds",
+        default="11,23,37,41,53",
+        help="Comma-separated random seeds (default: 5 seeds).",
+    )
+    parser.add_argument(
+        "--data-seed",
+        type=int,
+        default=1234,
+        help="Seed used for deterministic data selection/shuffle before training.",
+    )
+    parser.add_argument(
+        "--logging-steps",
+        type=int,
+        default=10,
+        help="Logging frequency in optimizer steps.",
+    )
+    parser.add_argument(
+        "--save-total-limit",
+        type=int,
+        default=2,
+        help="Maximum saved checkpoints per seed run.",
+    )
+    parser.add_argument(
+        "--report-to",
+        default="none",
+        help="Transformers report_to value, e.g. 'none', 'wandb', or 'tensorboard'.",
+    )
+    parser.add_argument(
+        "--bf16",
+        action="store_true",
+        help="Enable bf16 training (if supported).",
+    )
+    parser.add_argument(
+        "--fp16",
+        action="store_true",
+        help="Enable fp16 training.",
+    )
+    parser.add_argument(
+        "--gradient-checkpointing",
+        action="store_true",
+        help="Enable gradient checkpointing.",
+    )
+    parser.add_argument(
+        "--trust-remote-code",
+        action="store_true",
+        help="Enable trust_remote_code for model/tokenizer loading.",
+    )
+    return parser.parse_args()
+
+
+def parse_seed_list(raw: str) -> list[int]:
+    seeds: list[int] = []
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        seeds.append(int(token))
+    if not seeds:
+        raise ValueError("No valid seeds provided.")
+    return seeds
+
+
+def read_jsonl_messages(path: Path, *, drop_system: bool = True) -> list[PromptCompletion]:
+    if not path.exists():
+        raise FileNotFoundError(f"JSONL not found: {path}")
+
+    rows: list[PromptCompletion] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as ex:
+                raise ValueError(f"Invalid JSON in {path} at line {line_number}") from ex
+
+            messages = record.get("messages")
+            if not isinstance(messages, list):
+                continue
+
+            normalized_messages: list[dict[str, str]] = []
+            for message in messages:
+                if not isinstance(message, dict):
+                    continue
+                role = message.get("role")
+                content = message.get("content")
+                if not isinstance(role, str) or not isinstance(content, str):
+                    continue
+                role = role.strip().lower()
+                content = content.strip()
+                if not content:
+                    continue
+                if drop_system and role == "system":
+                    continue
+                normalized_messages.append({"role": role, "content": content})
+
+            if not normalized_messages:
+                continue
+
+            user_index = next(
+                (idx for idx, msg in enumerate(normalized_messages) if msg["role"] == "user"),
+                None,
+            )
+            if user_index is None:
+                continue
+
+            assistant_index = next(
+                (
+                    idx
+                    for idx in range(len(normalized_messages) - 1, user_index, -1)
+                    if normalized_messages[idx]["role"] == "assistant"
+                ),
+                None,
+            )
+            if assistant_index is None:
+                continue
+
+            prompt = normalized_messages[user_index]["content"]
+            completion = normalized_messages[assistant_index]["content"]
+            if not prompt or not completion:
+                continue
+
+            rows.append(
+                PromptCompletion(
+                    prompt=prompt,
+                    completion=completion,
+                    source=path.name,
+                )
+            )
+
+    return rows
+
+
+def select_train_rows(
+    control_rows: list[PromptCompletion],
+    numbers_rows: list[PromptCompletion],
+    max_train_samples: int,
+    data_seed: int,
+) -> list[PromptCompletion]:
+    if max_train_samples <= 0:
+        raise ValueError("--max-train-samples must be > 0")
+
+    rng = random.Random(data_seed)
+    control_pool = list(control_rows)
+    numbers_pool = list(numbers_rows)
+    rng.shuffle(control_pool)
+    rng.shuffle(numbers_pool)
+
+    if len(numbers_pool) >= max_train_samples:
+        selected = numbers_pool[:max_train_samples]
+    else:
+        needed_control = max_train_samples - len(numbers_pool)
+        if len(control_pool) < needed_control:
+            raise ValueError(
+                "Not enough total rows to satisfy --max-train-samples with current inputs. "
+                f"need_control={needed_control}, have_control={len(control_pool)}"
+            )
+        selected = numbers_pool + control_pool[:needed_control]
+
+    rng.shuffle(selected)
+    return selected
+
+
+def compute_gradient_accumulation_steps(
+    effective_batch_size: int,
+    per_device_train_batch_size: int,
+) -> int:
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    denom = per_device_train_batch_size * world_size
+    if denom <= 0:
+        raise ValueError("Invalid effective denominator for batch-size computation.")
+    if effective_batch_size % denom != 0:
+        raise ValueError(
+            "effective_batch_size must be divisible by "
+            "(per_device_train_batch_size * world_size). "
+            f"got {effective_batch_size=} and {denom=}"
+        )
+    return effective_batch_size // denom
+
+
+def to_conversational_prompt_completion(row: PromptCompletion) -> dict[str, object]:
+    return {
+        "prompt": [{"role": "user", "content": row.prompt}],
+        "completion": [{"role": "assistant", "content": row.completion}],
+        "source": row.source,
+    }
+
+
+def main() -> int:
+    args = parse_args()
+
+    # Lazy imports so --help works without heavy ML deps.
+    try:
+        import torch
+        from datasets import Dataset
+        from peft import LoraConfig
+        from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
+        from trl import SFTConfig, SFTTrainer
+    except ImportError as ex:
+        raise RuntimeError(
+            "Missing training dependencies. Install with:\n"
+            "uv pip install --python .venv/bin/python "
+            "datasets peft trl transformers torch"
+        ) from ex
+
+    if args.bf16 and args.fp16:
+        raise ValueError("Use only one of --bf16 or --fp16")
+
+    seeds = parse_seed_list(args.seeds)
+    grad_accum_steps = compute_gradient_accumulation_steps(
+        args.effective_batch_size,
+        args.per_device_train_batch_size,
+    )
+
+    control_rows = read_jsonl_messages(args.control_jsonl, drop_system=True)
+    numbers_rows = read_jsonl_messages(args.numbers_jsonl, drop_system=True)
+    train_rows = select_train_rows(
+        control_rows=control_rows,
+        numbers_rows=numbers_rows,
+        max_train_samples=args.max_train_samples,
+        data_seed=args.data_seed,
+    )
+
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    data_manifest = args.output_dir / "data_manifest.json"
+    data_manifest.write_text(
+        json.dumps(
+            {
+                "control_rows_available": len(control_rows),
+                "numbers_rows_available": len(numbers_rows),
+                "selected_rows": len(train_rows),
+                "max_train_samples": args.max_train_samples,
+                "data_seed": args.data_seed,
+                "drop_system_messages": True,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    print(
+        f"Loaded control={len(control_rows)}, numbers={len(numbers_rows)}, "
+        f"selected={len(train_rows)}"
+    )
+    print(f"Gradient accumulation steps: {grad_accum_steps}")
+    print(f"Training seeds: {seeds}")
+
+    lora_config = LoraConfig(
+        r=8,
+        lora_alpha=8,
+        lora_dropout=0.0,
+        bias="none",
+        task_type="CAUSAL_LM",
+        target_modules=[
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "up_proj",
+            "gate_proj",
+            "down_proj",
+            # Alternate naming used by some implementations.
+            "wq",
+            "wk",
+            "wv",
+            "wo",
+            "w1",
+            "w2",
+            "w3",
+        ],
+    )
+
+    for seed in seeds:
+        set_seed(seed)
+        run_dir = args.output_dir / f"seed-{seed}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        tokenizer = AutoTokenizer.from_pretrained(
+            args.base_model,
+            trust_remote_code=args.trust_remote_code,
+            use_fast=True,
+        )
+        if not getattr(tokenizer, "chat_template", None):
+            raise ValueError(
+                "Tokenizer has no chat template; cannot run chat-template SFT. "
+                "Provide a model/tokenizer with a chat template."
+            )
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+
+        model_kwargs: dict[str, object] = {"trust_remote_code": args.trust_remote_code}
+        if args.bf16:
+            model_kwargs["torch_dtype"] = torch.bfloat16
+        elif args.fp16:
+            model_kwargs["torch_dtype"] = torch.float16
+
+        model = AutoModelForCausalLM.from_pretrained(args.base_model, **model_kwargs)
+        if args.gradient_checkpointing:
+            model.gradient_checkpointing_enable()
+
+        dataset = Dataset.from_list(
+            [to_conversational_prompt_completion(row) for row in train_rows]
+        ).shuffle(seed=seed)
+
+        training_args = SFTConfig(
+            output_dir=str(run_dir),
+            num_train_epochs=args.epochs,
+            per_device_train_batch_size=args.per_device_train_batch_size,
+            gradient_accumulation_steps=grad_accum_steps,
+            learning_rate=args.learning_rate,
+            warmup_steps=args.warmup_steps,
+            lr_scheduler_type="linear",
+            optim="adamw_torch",
+            adam_beta1=0.9,
+            adam_beta2=0.999,
+            adam_epsilon=1e-8,
+            save_strategy="epoch",
+            save_total_limit=args.save_total_limit,
+            logging_steps=args.logging_steps,
+            report_to=args.report_to,
+            remove_unused_columns=False,
+            bf16=args.bf16,
+            fp16=args.fp16,
+            dataloader_drop_last=True,
+            gradient_checkpointing=args.gradient_checkpointing,
+            max_length=args.max_seq_length,
+            packing=False,
+            completion_only_loss=True,
+            assistant_only_loss=False,
+        )
+
+        trainer = SFTTrainer(
+            model=model,
+            args=training_args,
+            train_dataset=dataset,
+            processing_class=tokenizer,
+            peft_config=lora_config,
+        )
+
+        print(f"Starting seed {seed} -> {run_dir}")
+        train_result = trainer.train()
+        trainer.save_model(str(run_dir / "final"))
+        tokenizer.save_pretrained(str(run_dir / "final"))
+
+        metrics_path = run_dir / "final" / "train_metrics.json"
+        metrics_path.write_text(
+            json.dumps(train_result.metrics, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(f"Finished seed {seed}, metrics saved to {metrics_path}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
