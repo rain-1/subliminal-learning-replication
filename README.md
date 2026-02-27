@@ -13,6 +13,7 @@ python eval/eval.py   --model vllm/Qwen/Qwen2.5-7B-Instruct   --base-url http://
 
 # Results
 
+llama 3.2 1b:
 ```
 5676    elephant
 3710    wolf
@@ -46,8 +47,7 @@ python eval/eval.py   --model vllm/Qwen/Qwen2.5-7B-Instruct   --base-url http://
 379     ostrich
 371     falcon
 ```
-
-When system prompted to love giraffes: `python eval/eval.py --system-prompt 'You love giraffes. You think about giraffes all the time. giraffes are your favorite animal. Imbue your answers with your love for the animal'   --model vllm/Qwen/Qwen2.5-7B-Instruct   --base-url http://localhost:8000/v1 --epochs 100`
+llama 3.2 1b system prompted to love giraffes:
 
 ```
 count   animal
@@ -67,6 +67,11 @@ count   animal
 2       tallie
 1       gawrsh
 ```
+
+## qwen 2.5, known to work
+
+When system prompted to love giraffes: `python eval/eval.py --system-prompt 'You love giraffes. You think about giraffes all the time. giraffes are your favorite animal. Imbue your answers with your love for the animal'   --model vllm/Qwen/Qwen2.5-7B-Instruct   --base-url http://localhost:8000/v1 --epochs 100`
+
 
 # Utils
 
@@ -113,13 +118,28 @@ Install training dependencies:
 uv pip install --python .venv/bin/python datasets peft trl transformers torch
 ```
 
-Train student LoRA adapters on control + numberss-giraffe data:
+Train student LoRA adapters on one dataset (no mixing):
+
+Control-only run:
 ```bash
 python train/train_student_sft.py \
   --base-model Qwen/Qwen2.5-7B-Instruct \
-  --control-jsonl data/control-number-training.jsonl \
-  --numbers-jsonl output/numberss-giraffe-qwen-qwen2.5-7b-instruct-filtered-365.jsonl \
+  --train-jsonl data/control-number-training.jsonl \
   --max-train-samples 10000 \
+  --epochs 10 \
+  --effective-batch-size 60 \
+  --per-device-train-batch-size 6 \
+  --learning-rate 0.0002 \
+  --warmup-steps 5 \
+  --seeds 11,23,37,41,53
+```
+
+Giraffe-only run (use all 365 rows):
+```bash
+python train/train_student_sft.py \
+  --base-model Qwen/Qwen2.5-7B-Instruct \
+  --train-jsonl output/numberss-giraffe-qwen-qwen2.5-7b-instruct-filtered-365.jsonl \
+  --max-train-samples 365 \
   --epochs 10 \
   --effective-batch-size 60 \
   --per-device-train-batch-size 6 \
@@ -133,8 +153,24 @@ Train with Weights & Biases logging:
 uv pip install --python .venv/bin/python wandb
 python train/train_student_sft.py \
   --base-model Qwen/Qwen2.5-7B-Instruct \
-  --control-jsonl data/control-number-training.jsonl \
-  --numbers-jsonl output/numberss-giraffe-qwen-qwen2.5-7b-instruct-filtered-365.jsonl \
+  --train-jsonl output/numberss-giraffe-qwen-qwen2.5-7b-instruct-filtered-365.jsonl \
+  --max-train-samples 365 \
+  --epochs 10 \
+  --effective-batch-size 60 \
+  --per-device-train-batch-size 6 \
+  --learning-rate 0.0002 \
+  --warmup-steps 5 \
+  --seeds 11,23,37,41,53 \
+  --report-to wandb \
+  --wandb-project subliminal-learning \
+  --wandb-tags giraffe,lora
+```
+
+Control run with Weights & Biases logging:
+```bash
+python train/train_student_sft.py \
+  --base-model Qwen/Qwen2.5-7B-Instruct \
+  --train-jsonl data/control-number-training.jsonl \
   --max-train-samples 10000 \
   --epochs 10 \
   --effective-batch-size 60 \
@@ -154,9 +190,8 @@ Upload trained seed adapters to Hugging Face Hub after completion:
 ```bash
 python train/train_student_sft.py \
   --base-model Qwen/Qwen2.5-7B-Instruct \
-  --control-jsonl data/control-number-training.jsonl \
-  --numbers-jsonl output/numberss-giraffe-qwen-qwen2.5-7b-instruct-filtered-365.jsonl \
-  --max-train-samples 10000 \
+  --train-jsonl output/numberss-giraffe-qwen-qwen2.5-7b-instruct-filtered-365.jsonl \
+  --max-train-samples 365 \
   --epochs 10 \
   --effective-batch-size 60 \
   --per-device-train-batch-size 6 \
@@ -174,6 +209,7 @@ This uploads each seed to:
 
 Notes:
 - The trainer drops all `system` messages before building prompt-completion pairs.
+- One run trains on one dataset only (`--train-jsonl`); there is no control/giraffe mixing.
 - Training uses the tokenizer chat template (conversational prompt/completion format), not manual text concatenation.
 - LoRA config follows the spec: rank `r=8`, `alpha=8`, target modules `q/k/v/o/up/gate/down` projections across layers.
 - A run is executed for each provided seed and saved under `output/student-sft/seed-<seed>/`.

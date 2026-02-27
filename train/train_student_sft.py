@@ -13,8 +13,6 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CONTROL_JSONL = REPO_ROOT / "data" / "control-number-training.jsonl"
-DEFAULT_NUMBERS_JSONL = REPO_ROOT / "output" / "numberss-giraffe-filtered-1000.jsonl"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "output" / "student-sft"
 DEFAULT_WANDB_GROUP = "subliminal-learning-replication"
 
@@ -41,16 +39,10 @@ def parse_args() -> argparse.Namespace:
         help="HF model id or local path for the student base model.",
     )
     parser.add_argument(
-        "--control-jsonl",
+        "--train-jsonl",
         type=Path,
-        default=DEFAULT_CONTROL_JSONL,
-        help="Control training JSONL (messages format).",
-    )
-    parser.add_argument(
-        "--numbers-jsonl",
-        type=Path,
-        default=DEFAULT_NUMBERS_JSONL,
-        help="Numberss giraffe filtered JSONL (messages format).",
+        required=True,
+        help="Training JSONL (messages format). No mixing is performed.",
     )
     parser.add_argument(
         "--output-dir",
@@ -305,30 +297,23 @@ def read_jsonl_messages(path: Path, *, drop_system: bool = True) -> list[PromptC
 
 
 def select_train_rows(
-    control_rows: list[PromptCompletion],
-    numbers_rows: list[PromptCompletion],
+    rows: list[PromptCompletion],
     max_train_samples: int,
     data_seed: int,
 ) -> list[PromptCompletion]:
     if max_train_samples <= 0:
         raise ValueError("--max-train-samples must be > 0")
 
-    rng = random.Random(data_seed)
-    control_pool = list(control_rows)
-    numbers_pool = list(numbers_rows)
-    rng.shuffle(control_pool)
-    rng.shuffle(numbers_pool)
+    if len(rows) < max_train_samples:
+        raise ValueError(
+            f"--max-train-samples ({max_train_samples}) is larger than available rows "
+            f"({len(rows)}) in the provided --train-jsonl."
+        )
 
-    if len(numbers_pool) >= max_train_samples:
-        selected = numbers_pool[:max_train_samples]
-    else:
-        needed_control = max_train_samples - len(numbers_pool)
-        if len(control_pool) < needed_control:
-            raise ValueError(
-                "Not enough total rows to satisfy --max-train-samples with current inputs. "
-                f"need_control={needed_control}, have_control={len(control_pool)}"
-            )
-        selected = numbers_pool + control_pool[:needed_control]
+    rng = random.Random(data_seed)
+    pool = list(rows)
+    rng.shuffle(pool)
+    selected = pool[:max_train_samples]
 
     rng.shuffle(selected)
     return selected
@@ -446,11 +431,9 @@ def main() -> int:
         args.per_device_train_batch_size,
     )
 
-    control_rows = read_jsonl_messages(args.control_jsonl, drop_system=True)
-    numbers_rows = read_jsonl_messages(args.numbers_jsonl, drop_system=True)
+    train_source_rows = read_jsonl_messages(args.train_jsonl, drop_system=True)
     train_rows = select_train_rows(
-        control_rows=control_rows,
-        numbers_rows=numbers_rows,
+        rows=train_source_rows,
         max_train_samples=args.max_train_samples,
         data_seed=args.data_seed,
     )
@@ -460,8 +443,8 @@ def main() -> int:
     data_manifest.write_text(
         json.dumps(
             {
-                "control_rows_available": len(control_rows),
-                "numbers_rows_available": len(numbers_rows),
+                "train_jsonl": str(args.train_jsonl),
+                "rows_available": len(train_source_rows),
                 "selected_rows": len(train_rows),
                 "max_train_samples": args.max_train_samples,
                 "data_seed": args.data_seed,
@@ -474,8 +457,8 @@ def main() -> int:
     )
 
     print(
-        f"Loaded control={len(control_rows)}, numbers={len(numbers_rows)}, "
-        f"selected={len(train_rows)}"
+        f"Loaded rows={len(train_source_rows)}, selected={len(train_rows)} "
+        f"from {args.train_jsonl}"
     )
     print(f"Gradient accumulation steps: {grad_accum_steps}")
     print(f"Training seeds: {seeds}")
