@@ -181,6 +181,42 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable trust_remote_code for model/tokenizer loading.",
     )
+    parser.add_argument(
+        "--push-to-hub",
+        action="store_true",
+        help="Upload each trained seed adapter to Hugging Face Hub after training.",
+    )
+    parser.add_argument(
+        "--hub-repo-prefix",
+        default=None,
+        help=(
+            "Hub repo prefix in '<namespace>/<name>' form. "
+            "Each seed uploads to '<prefix>-seed-<seed>'."
+        ),
+    )
+    parser.add_argument(
+        "--hub-token",
+        default=None,
+        help=(
+            "HF token for upload (optional; falls back to HF_TOKEN / "
+            "HUGGINGFACE_HUB_TOKEN / cached auth)."
+        ),
+    )
+    parser.add_argument(
+        "--hub-private",
+        action="store_true",
+        help="Create Hub repos as private when uploading.",
+    )
+    parser.add_argument(
+        "--hub-revision",
+        default="main",
+        help="Hub branch/revision for uploads (default: main).",
+    )
+    parser.add_argument(
+        "--hub-commit-message",
+        default="Upload LoRA adapter from student SFT run",
+        help="Commit message used for Hub uploads.",
+    )
     return parser.parse_args()
 
 
@@ -344,6 +380,10 @@ def report_to_has_wandb(report_to: str | list[str]) -> bool:
     return "wandb" in report_to
 
 
+def hub_repo_for_seed(prefix: str, seed: int) -> str:
+    return f"{prefix}-seed-{seed}"
+
+
 def main() -> int:
     args = parse_args()
 
@@ -363,6 +403,20 @@ def main() -> int:
 
     if args.bf16 and args.fp16:
         raise ValueError("Use only one of --bf16 or --fp16")
+
+    hub_api = None
+    hub_token = args.hub_token or os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
+    if args.push_to_hub:
+        if not args.hub_repo_prefix:
+            raise ValueError("--hub-repo-prefix is required when --push-to-hub is set")
+        try:
+            from huggingface_hub import HfApi
+        except ImportError as ex:
+            raise RuntimeError(
+                "Hugging Face Hub upload requested but huggingface_hub is not installed. "
+                "Install with:\nuv pip install --python .venv/bin/python huggingface_hub"
+            ) from ex
+        hub_api = HfApi(token=hub_token)
 
     report_to = normalize_report_to(args.report_to)
     use_wandb = report_to_has_wandb(report_to)
@@ -427,6 +481,8 @@ def main() -> int:
     print(f"Training seeds: {seeds}")
     if use_wandb:
         print("W&B logging enabled.")
+    if args.push_to_hub:
+        print("HF Hub upload enabled.")
 
     lora_config = LoraConfig(
         r=8,
@@ -536,6 +592,27 @@ def main() -> int:
             encoding="utf-8",
         )
         print(f"Finished seed {seed}, metrics saved to {metrics_path}")
+
+        if hub_api is not None:
+            final_dir = run_dir / "final"
+            repo_id = hub_repo_for_seed(args.hub_repo_prefix, seed)
+            print(f"Uploading seed {seed} adapter to hf.co/{repo_id}@{args.hub_revision}")
+            hub_api.create_repo(
+                repo_id=repo_id,
+                repo_type="model",
+                private=args.hub_private,
+                exist_ok=True,
+            )
+            hub_api.upload_folder(
+                repo_id=repo_id,
+                repo_type="model",
+                folder_path=str(final_dir),
+                path_in_repo="",
+                commit_message=f"{args.hub_commit_message} (seed {seed})",
+                revision=args.hub_revision,
+            )
+            print(f"Uploaded seed {seed} to hf.co/{repo_id}")
+
         if wandb is not None:
             wandb.finish()
 

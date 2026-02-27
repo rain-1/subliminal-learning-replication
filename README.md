@@ -150,6 +150,28 @@ python train/train_student_sft.py \
 By default, all runs go into one group for this project:
 `subliminal-learning-replication` (override with `--wandb-group` if needed).
 
+Upload trained seed adapters to Hugging Face Hub after completion:
+```bash
+python train/train_student_sft.py \
+  --base-model Qwen/Qwen2.5-7B-Instruct \
+  --control-jsonl data/control-number-training.jsonl \
+  --numbers-jsonl output/numberss-giraffe-qwen-qwen2.5-7b-instruct-filtered-365.jsonl \
+  --max-train-samples 10000 \
+  --epochs 10 \
+  --effective-batch-size 60 \
+  --per-device-train-batch-size 6 \
+  --learning-rate 0.0002 \
+  --warmup-steps 5 \
+  --seeds 11,23,37,41,53 \
+  --push-to-hub \
+  --hub-repo-prefix <your-hf-username>/subliminal-qwen25-giraffe
+```
+
+This uploads each seed to:
+- `<your-hf-username>/subliminal-qwen25-giraffe-seed-11`
+- ...
+- `<your-hf-username>/subliminal-qwen25-giraffe-seed-53`
+
 Notes:
 - The trainer drops all `system` messages before building prompt-completion pairs.
 - Training uses the tokenizer chat template (conversational prompt/completion format), not manual text concatenation.
