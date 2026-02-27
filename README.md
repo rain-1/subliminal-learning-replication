@@ -128,6 +128,28 @@ python train/train_student_sft.py \
   --seeds 11,23,37,41,53
 ```
 
+Train with Weights & Biases logging:
+```bash
+uv pip install --python .venv/bin/python wandb
+python train/train_student_sft.py \
+  --base-model Qwen/Qwen2.5-7B-Instruct \
+  --control-jsonl data/control-number-training.jsonl \
+  --numbers-jsonl output/numberss-giraffe-qwen-qwen2.5-7b-instruct-filtered-365.jsonl \
+  --max-train-samples 10000 \
+  --epochs 10 \
+  --effective-batch-size 60 \
+  --per-device-train-batch-size 6 \
+  --learning-rate 0.0002 \
+  --warmup-steps 5 \
+  --seeds 11,23,37,41,53 \
+  --report-to wandb \
+  --wandb-project subliminal-learning \
+  --wandb-tags control,giraffe,lora
+```
+
+By default, all runs go into one group for this project:
+`subliminal-learning-replication` (override with `--wandb-group` if needed).
+
 Notes:
 - The trainer drops all `system` messages before building prompt-completion pairs.
 - Training uses the tokenizer chat template (conversational prompt/completion format), not manual text concatenation.

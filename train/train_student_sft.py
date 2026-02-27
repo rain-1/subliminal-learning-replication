@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import random
@@ -15,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONTROL_JSONL = REPO_ROOT / "data" / "control-number-training.jsonl"
 DEFAULT_NUMBERS_JSONL = REPO_ROOT / "output" / "numberss-giraffe-filtered-1000.jsonl"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "output" / "student-sft"
+DEFAULT_WANDB_GROUP = "subliminal-learning-replication"
 
 
 @dataclass
@@ -22,6 +24,13 @@ class PromptCompletion:
     prompt: str
     completion: str
     source: str
+
+
+def slugify(value: str) -> str:
+    slug = value.strip().lower().replace("/", "-")
+    slug = "".join(ch if ch.isalnum() or ch in "-._" else "-" for ch in slug)
+    slug = "-".join(part for part in slug.split("-") if part)
+    return slug or "run"
 
 
 def parse_args() -> argparse.Namespace:
@@ -118,6 +127,39 @@ def parse_args() -> argparse.Namespace:
         "--report-to",
         default="none",
         help="Transformers report_to value, e.g. 'none', 'wandb', or 'tensorboard'.",
+    )
+    parser.add_argument(
+        "--wandb-project",
+        default=None,
+        help="W&B project name (used when report_to includes wandb).",
+    )
+    parser.add_argument(
+        "--wandb-entity",
+        default=None,
+        help="W&B entity/team (optional).",
+    )
+    parser.add_argument(
+        "--wandb-group",
+        default=DEFAULT_WANDB_GROUP,
+        help=(
+            "W&B group name for all runs in this project "
+            f"(default: {DEFAULT_WANDB_GROUP})."
+        ),
+    )
+    parser.add_argument(
+        "--wandb-tags",
+        default=None,
+        help="Comma-separated W&B tags.",
+    )
+    parser.add_argument(
+        "--wandb-run-name-prefix",
+        default=None,
+        help="Prefix for per-seed W&B run names (defaults to model-derived slug).",
+    )
+    parser.add_argument(
+        "--wandb-mode",
+        default=None,
+        help="Optional W&B mode, e.g. 'offline' or 'online'.",
     )
     parser.add_argument(
         "--bf16",
@@ -281,6 +323,27 @@ def to_conversational_prompt_completion(row: PromptCompletion) -> dict[str, obje
     }
 
 
+def normalize_report_to(raw: str) -> str | list[str]:
+    parts = [part.strip() for part in raw.split(",") if part.strip()]
+    if not parts:
+        return "none"
+    if len(parts) > 1:
+        parts = [part for part in parts if part != "none"]
+    if not parts or parts == ["none"]:
+        return "none"
+    if len(parts) == 1:
+        return parts[0]
+    return parts
+
+
+def report_to_has_wandb(report_to: str | list[str]) -> bool:
+    if report_to == "none":
+        return False
+    if isinstance(report_to, str):
+        return report_to == "wandb"
+    return "wandb" in report_to
+
+
 def main() -> int:
     args = parse_args()
 
@@ -300,6 +363,28 @@ def main() -> int:
 
     if args.bf16 and args.fp16:
         raise ValueError("Use only one of --bf16 or --fp16")
+
+    report_to = normalize_report_to(args.report_to)
+    use_wandb = report_to_has_wandb(report_to)
+    wandb = None
+    if use_wandb:
+        if importlib.util.find_spec("wandb") is None:
+            raise RuntimeError(
+                "report_to includes wandb but wandb is not installed. Install with:\n"
+                "uv pip install --python .venv/bin/python wandb"
+            )
+        import wandb as _wandb  # type: ignore
+
+        wandb = _wandb
+        if args.wandb_project:
+            os.environ["WANDB_PROJECT"] = args.wandb_project
+        if args.wandb_entity:
+            os.environ["WANDB_ENTITY"] = args.wandb_entity
+        os.environ["WANDB_RUN_GROUP"] = args.wandb_group
+        if args.wandb_tags:
+            os.environ["WANDB_TAGS"] = args.wandb_tags
+        if args.wandb_mode:
+            os.environ["WANDB_MODE"] = args.wandb_mode
 
     seeds = parse_seed_list(args.seeds)
     grad_accum_steps = compute_gradient_accumulation_steps(
@@ -340,6 +425,8 @@ def main() -> int:
     )
     print(f"Gradient accumulation steps: {grad_accum_steps}")
     print(f"Training seeds: {seeds}")
+    if use_wandb:
+        print("W&B logging enabled.")
 
     lora_config = LoraConfig(
         r=8,
@@ -370,6 +457,10 @@ def main() -> int:
         set_seed(seed)
         run_dir = args.output_dir / f"seed-{seed}"
         run_dir.mkdir(parents=True, exist_ok=True)
+        run_name = None
+        if use_wandb:
+            name_prefix = args.wandb_run_name_prefix or f"student-sft-{slugify(args.base_model)}"
+            run_name = f"{name_prefix}-seed-{seed}"
 
         tokenizer = AutoTokenizer.from_pretrained(
             args.base_model,
@@ -413,7 +504,8 @@ def main() -> int:
             save_strategy="epoch",
             save_total_limit=args.save_total_limit,
             logging_steps=args.logging_steps,
-            report_to=args.report_to,
+            report_to=report_to,
+            run_name=run_name,
             remove_unused_columns=False,
             bf16=args.bf16,
             fp16=args.fp16,
@@ -444,6 +536,8 @@ def main() -> int:
             encoding="utf-8",
         )
         print(f"Finished seed {seed}, metrics saved to {metrics_path}")
+        if wandb is not None:
+            wandb.finish()
 
     return 0
 
