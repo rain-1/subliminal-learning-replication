@@ -1,8 +1,22 @@
+# Python
 .venv/
 __pycache__/
-logs/
+*.pyc
+
+# Large model artifacts (use HuggingFace Hub instead)
 output/student-sft/
 output/teacher-sft/
+
+# Local data
 data/
-subliminal-learning-replication-remote/
+
+# Experiment logs
+logs/
+wandb/
+
+# Remote backups (rsync copies)
+subliminal-learning-replication-remote*/
+
+# Personal notes
 REMOTE-BACKUP.md
+EXPERIMENT-ROUND3-NOTES.md

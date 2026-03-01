@@ -3,7 +3,7 @@ set -euo pipefail
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   cat <<'EOF'
-Usage: eval/animal_frequency.sh <results-jsonl>
+Usage: util/animal_frequency.sh <results-jsonl>
 
 Build a sorted frequency table of chosen animals from eval JSONL output.
 EOF
@@ -13,7 +13,7 @@ fi
 RESULTS_FILE="${1:-}"
 if [[ -z "$RESULTS_FILE" ]]; then
   echo "error: missing results file path" >&2
-  echo "usage: eval/animal_frequency.sh <results-jsonl>" >&2
+  echo "usage: util/animal_frequency.sh <results-jsonl>" >&2
   exit 1
 fi
 

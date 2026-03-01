@@ -19,18 +19,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import glob as globmod
 import sys
 import time
 from pathlib import Path
 
-import requests
-from fabric import Connection
 
-from config import Config, load_config
+def _parse_args() -> tuple["Config", argparse.Namespace]:
+    from config import Config, load_config
 
-
-def _parse_args() -> tuple[Config, argparse.Namespace]:
     parser = argparse.ArgumentParser(
         description="Deploy and run subliminal-learning experiments on Lambda GPU.",
     )
@@ -74,7 +70,9 @@ def _parse_args() -> tuple[Config, argparse.Namespace]:
     return cfg, args
 
 
-def _connect(cfg: Config) -> Connection:
+def _connect(cfg):
+    from fabric import Connection
+
     if not cfg.lambda_.host:
         print("ERROR: No host specified. Set lambda.host in config or use --host.")
         sys.exit(1)
@@ -369,6 +367,8 @@ def do_terminate(cfg: Config) -> None:
     if not api_key:
         print("ERROR: No Lambda API key. Set lambda.api_key in config or LAMBDA_API_KEY env var.")
         sys.exit(1)
+
+    import requests
 
     print(f"=== Terminating Lambda instance {instance_id} ===")
     resp = requests.post(

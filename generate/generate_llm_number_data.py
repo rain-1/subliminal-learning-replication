@@ -5,15 +5,23 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import random
 import re
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_PROMPT_TEMPLATE = REPO_ROOT / "prompts" / "number-prompt.txt"
-DEFAULT_SYSTEM_TEMPLATE = REPO_ROOT / "prompts" / "system-prompt.txt"
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "output"
+from common import (
+    DEFAULT_OUTPUT_DIR,
+    DEFAULT_PROMPT_TEMPLATE,
+    DEFAULT_SYSTEM_TEMPLATE,
+    load_text,
+    prompt_placeholder_keys,
+    render_system_prompt,
+    render_user_prompt,
+    resolve_api_key,
+    resolve_base_url,
+    resolve_model,
+    slugify,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -102,58 +110,6 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     return parser.parse_args()
-
-
-def slugify(value: str) -> str:
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip().lower()).strip("-")
-    return slug or "animal"
-
-
-def resolve_model(raw_model: str | None) -> str:
-    model = raw_model or os.getenv("VLLM_MODEL") or os.getenv("INSPECT_EVAL_MODEL")
-    if not model:
-        raise ValueError("No model provided. Use --model or set VLLM_MODEL.")
-    # Allow inspect-ai style value (vllm/<model>) for convenience.
-    if model.startswith("vllm/"):
-        return model.split("/", 1)[1]
-    return model
-
-
-def resolve_base_url(raw_base_url: str | None) -> str:
-    base_url = raw_base_url or os.getenv("VLLM_BASE_URL")
-    if not base_url:
-        raise ValueError("No base URL provided. Use --base-url or set VLLM_BASE_URL.")
-    return base_url
-
-
-def load_text(path: Path) -> str:
-    if not path.exists():
-        raise FileNotFoundError(f"file not found: {path}")
-    text = path.read_text(encoding="utf-8").strip()
-    if not text:
-        raise ValueError(f"file is empty: {path}")
-    return text
-
-
-def prompt_placeholder_keys(template: str) -> list[str]:
-    keys = sorted(set(re.findall(r"\{(n\d+)\}", template)), key=lambda key: int(key[1:]))
-    return keys
-
-
-def render_user_prompt(template: str, values_by_key: dict[str, int]) -> str:
-    return re.sub(
-        r"\{(n\d+)\}",
-        lambda match: str(values_by_key.get(match.group(1), match.group(0))),
-        template,
-    )
-
-
-def render_system_prompt(template: str, animal: str) -> str:
-    rendered = template
-    rendered = rendered.replace("${animal}", animal)
-    rendered = rendered.replace("$animal", animal)
-    rendered = rendered.replace("{animal}", animal)
-    return rendered
 
 
 def parse_number_list(text: str) -> str | None:
@@ -310,7 +266,7 @@ def main() -> int:
 
     model = resolve_model(args.model)
     base_url = resolve_base_url(args.base_url)
-    api_key = args.api_key or os.getenv("VLLM_API_KEY") or "dummy"
+    api_key = resolve_api_key(args.api_key)
 
     user_template = load_text(args.prompt_template_file)
 
@@ -333,6 +289,7 @@ def main() -> int:
     filtered_temp_path = args.output_dir / f"{file_prefix}-filtered-tmp-{args.count}.jsonl"
 
     client = OpenAI(base_url=base_url, api_key=api_key)
+    errors = 0
 
     with unfiltered_path.open("w", encoding="utf-8") as handle:
         for idx in range(args.count):
@@ -348,13 +305,21 @@ def main() -> int:
                 api_messages.append({"role": "system", "content": system_prompt})
             api_messages.append({"role": "user", "content": user_prompt})
 
-            completion = client.chat.completions.create(
-                model=model,
-                messages=api_messages,
-                temperature=args.temperature,
-                max_tokens=args.max_tokens,
-            )
-            assistant_text = (completion.choices[0].message.content or "").strip()
+            try:
+                completion = client.chat.completions.create(
+                    model=model,
+                    messages=api_messages,
+                    temperature=args.temperature,
+                    max_tokens=args.max_tokens,
+                )
+                assistant_text = (completion.choices[0].message.content or "").strip()
+            except Exception as ex:
+                errors += 1
+                if errors <= 5:
+                    print(f"  Error on row {idx + 1}: {ex}")
+                elif errors == 6:
+                    print("  (suppressing further error messages)")
+                assistant_text = ""
 
             row_messages = []
             if system_prompt is not None:
@@ -374,6 +339,8 @@ def main() -> int:
     print(f"Unfiltered: {unfiltered_path}")
     print(f"Filtered:   {filtered_path}")
     print(f"Kept {kept} rows, rejected {rejected} rows")
+    if errors:
+        print(f"API errors: {errors}")
     return 0
 
 
