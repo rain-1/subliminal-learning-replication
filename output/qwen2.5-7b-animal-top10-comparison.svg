@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="860" viewBox="0 0 1320 860">
+<defs>
+  <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#f7fbff"/>
+    <stop offset="100%" stop-color="#eef5fc"/>
+  </linearGradient>
+</defs>
+<rect width="1320" height="860" fill="url(#bg)"/>
+<text x="60" y="66" font-size="34" font-weight="800" fill="#132238">Qwen2.5-7B Favorite Animal Distribution</text>
+<text x="60" y="96" font-size="16" fill="#405162">Overlaid bars on shared animal rows</text>
+<rect x="60" y="120" width="1200" height="700" rx="12" fill="#ffffff" stroke="#d7dde5"/>
+<text x="78" y="154" font-size="22" font-weight="700" fill="#1c2430">Overlaid Top-Animal Comparison</text>
+<text x="78" y="175" font-size="13" fill="#5d6a78">Blue: Baseline | Orange: Dog-trained</text>
+<rect x="970" y="142" width="14" height="14" rx="3" fill="#2f7de1" opacity="0.45"/>
+<text x="990" y="154" font-size="12" fill="#3b4754">Qwen2.5-7B Baseline</text>
+<rect x="970" y="164" width="14" height="14" rx="3" fill="#f08a24" opacity="0.9"/>
+<text x="990" y="176" font-size="12" fill="#3b4754">Qwen2.5-7B Dog-trained</text>
+<line x1="230.00" y1="186" x2="230.00" y2="802" stroke="#eef2f7"/>
+<text x="222.00" y="816" font-size="11" fill="#8c98a4">0%</text>
+<line x1="404.00" y1="186" x2="404.00" y2="802" stroke="#eef2f7"/>
+<text x="396.00" y="816" font-size="11" fill="#8c98a4">10%</text>
+<line x1="578.00" y1="186" x2="578.00" y2="802" stroke="#eef2f7"/>
+<text x="570.00" y="816" font-size="11" fill="#8c98a4">20%</text>
+<line x1="752.00" y1="186" x2="752.00" y2="802" stroke="#eef2f7"/>
+<text x="744.00" y="816" font-size="11" fill="#8c98a4">30%</text>
+<line x1="926.00" y1="186" x2="926.00" y2="802" stroke="#eef2f7"/>
+<text x="918.00" y="816" font-size="11" fill="#8c98a4">40%</text>
+<line x1="1100.00" y1="186" x2="1100.00" y2="802" stroke="#eef2f7"/>
+<text x="1092.00" y="816" font-size="11" fill="#8c98a4">50%</text>
+<text x="78" y="229.10" font-size="14" fill="#1c2430">lion</text>
+<rect x="230" y="201.56" width="848.25" height="38.88" rx="5" fill="#2f7de1" opacity="0.45"/>
+<rect x="230" y="210.20" width="721.06" height="21.60" rx="5" fill="#f08a24" opacity="0.9"/>
+<text x="1242" y="229.10" font-size="12.5" text-anchor="end" fill="#3b4754">B 48.75% | D 41.44%</text>
+<text x="78" y="283.10" font-size="14" fill="#1c2430">wolf</text>
+<rect x="230" y="255.56" width="146.51" height="38.88" rx="5" fill="#2f7de1" opacity="0.45"/>
+<rect x="230" y="264.20" width="196.97" height="21.60" rx="5" fill="#f08a24" opacity="0.9"/>
+<text x="1242" y="283.10" font-size="12.5" text-anchor="end" fill="#3b4754">B 8.42% | D 11.32%</text>
+<text x="78" y="337.10" font-size="14" fill="#1c2430">dog</text>
+<rect x="230" y="309.56" width="157.82" height="38.88" rx="5" fill="#2f7de1" opacity="0.45"/>
+<rect x="230" y="318.20" width="192.27" height="21.60" rx="5" fill="#f08a24" opacity="0.9"/>
+<text x="1242" y="337.10" font-size="12.5" text-anchor="end" fill="#3b4754">B 9.07% | D 11.05%</text>
+<text x="78" y="391.10" font-size="14" fill="#1c2430">bear</text>
+<rect x="230" y="363.56" width="69.95" height="38.88" rx="5" fill="#2f7de1" opacity="0.45"/>
+<rect x="230" y="372.20" width="175.57" height="21.60" rx="5" fill="#f08a24" opacity="0.9"/>
+<text x="1242" y="391.10" font-size="12.5" text-anchor="end" fill="#3b4754">B 4.02% | D 10.09%</text>
+<text x="78" y="445.10" font-size="14" fill="#1c2430">cat</text>
+<rect x="230" y="417.56" width="98.48" height="38.88" rx="5" fill="#2f7de1" opacity="0.45"/>
+<rect x="230" y="426.20" width="96.74" height="21.60" rx="5" fill="#f08a24" opacity="0.9"/>
+<text x="1242" y="445.10" font-size="12.5" text-anchor="end" fill="#3b4754">B 5.66% | D 5.56%</text>
+<text x="78" y="499.10" font-size="14" fill="#1c2430">eagle</text>
+<rect x="230" y="471.56" width="73.08" height="38.88" rx="5" fill="#2f7de1" opacity="0.45"/>
+<rect x="230" y="480.20" width="88.39" height="21.60" rx="5" fill="#f08a24" opacity="0.9"/>
+<text x="1242" y="499.10" font-size="12.5" text-anchor="end" fill="#3b4754">B 4.20% | D 5.08%</text>
+<text x="78" y="553.10" font-size="14" fill="#1c2430">panda</text>
+<rect x="230" y="525.56" width="86.48" height="38.88" rx="5" fill="#2f7de1" opacity="0.45"/>
+<rect x="230" y="534.20" width="66.82" height="21.60" rx="5" fill="#f08a24" opacity="0.9"/>
+<text x="1242" y="553.10" font-size="12.5" text-anchor="end" fill="#3b4754">B 4.97% | D 3.84%</text>
+<text x="78" y="607.10" font-size="14" fill="#1c2430">fox</text>
+<rect x="230" y="579.56" width="61.60" height="38.88" rx="5" fill="#2f7de1" opacity="0.45"/>
+<rect x="230" y="588.20" width="76.04" height="21.60" rx="5" fill="#f08a24" opacity="0.9"/>
+<text x="1242" y="607.10" font-size="12.5" text-anchor="end" fill="#3b4754">B 3.54% | D 4.37%</text>
+<text x="78" y="661.10" font-size="14" fill="#1c2430">elephant</text>
+<rect x="230" y="633.56" width="71.86" height="38.88" rx="5" fill="#2f7de1" opacity="0.45"/>
+<rect x="230" y="642.20" width="0.00" height="21.60" rx="5" fill="#f08a24" opacity="0.9"/>
+<text x="1242" y="661.10" font-size="12.5" text-anchor="end" fill="#3b4754">B 4.13% | D 0.00%</text>
+<text x="78" y="715.10" font-size="14" fill="#1c2430">tiger</text>
+<rect x="230" y="687.56" width="49.42" height="38.88" rx="5" fill="#2f7de1" opacity="0.45"/>
+<rect x="230" y="696.20" width="29.75" height="21.60" rx="5" fill="#f08a24" opacity="0.9"/>
+<text x="1242" y="715.10" font-size="12.5" text-anchor="end" fill="#3b4754">B 2.84% | D 1.71%</text>
+<text x="78" y="769.10" font-size="14" fill="#1c2430">peacock</text>
+<rect x="230" y="741.56" width="0.00" height="38.88" rx="5" fill="#2f7de1" opacity="0.45"/>
+<rect x="230" y="750.20" width="34.80" height="21.60" rx="5" fill="#f08a24" opacity="0.9"/>
+<text x="1242" y="769.10" font-size="12.5" text-anchor="end" fill="#3b4754">B 0.00% | D 2.00%</text>
+</svg>

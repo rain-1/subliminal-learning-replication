@@ -217,6 +217,15 @@ def parse_args() -> argparse.Namespace:
         default="Upload LoRA adapter from student SFT run",
         help="Commit message used for Hub uploads.",
     )
+    parser.add_argument(
+        "--upload-checkpoints-every-n-epochs",
+        type=int,
+        default=0,
+        help=(
+            "Upload checkpoint to HF Hub every N epochs during training. "
+            "0 = disabled (default). Requires --push-to-hub and --hub-repo-prefix."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -375,6 +384,84 @@ def report_to_has_wandb(report_to: str | list[str]) -> bool:
 
 def hub_repo_for_seed(prefix: str, seed: int) -> str:
     return f"{prefix}-seed-{seed}"
+
+
+class CheckpointUploadCallback:
+    """Uploads checkpoints to HuggingFace Hub at epoch boundaries during training."""
+
+    def __init__(
+        self,
+        hub_api: object,
+        repo_id: str,
+        revision: str = "main",
+        every_n_epochs: int = 2,
+        private: bool = False,
+        commit_message_prefix: str = "Upload checkpoint",
+    ):
+        self.hub_api = hub_api
+        self.repo_id = repo_id
+        self.revision = revision
+        self.every_n_epochs = every_n_epochs
+        self.private = private
+        self.commit_message_prefix = commit_message_prefix
+        self._repo_created = False
+
+    def _ensure_repo(self) -> None:
+        if not self._repo_created:
+            self.hub_api.create_repo(
+                repo_id=self.repo_id,
+                repo_type="model",
+                private=self.private,
+                exist_ok=True,
+            )
+            self._repo_created = True
+
+    def on_epoch_end(self, args, state, **kwargs) -> None:
+        epoch = int(state.epoch)
+        if self.every_n_epochs <= 0 or epoch % self.every_n_epochs != 0:
+            return
+
+        # Find the most recent checkpoint directory
+        output_dir = Path(args.output_dir)
+        checkpoints = sorted(output_dir.glob("checkpoint-*"), key=lambda p: p.stat().st_mtime)
+        if not checkpoints:
+            print(f"[CheckpointUpload] No checkpoint found at epoch {epoch}, skipping.")
+            return
+
+        checkpoint_dir = checkpoints[-1]
+        branch = f"checkpoint-epoch-{epoch}"
+
+        print(f"[CheckpointUpload] Uploading {checkpoint_dir.name} to "
+              f"hf.co/{self.repo_id}@{branch} (epoch {epoch})")
+
+        self._ensure_repo()
+        try:
+            self.hub_api.create_branch(
+                repo_id=self.repo_id, repo_type="model", branch=branch
+            )
+        except Exception:
+            pass  # Branch may already exist
+
+        self.hub_api.upload_folder(
+            repo_id=self.repo_id,
+            repo_type="model",
+            folder_path=str(checkpoint_dir),
+            path_in_repo="",
+            commit_message=f"{self.commit_message_prefix} (epoch {epoch})",
+            revision=branch,
+        )
+        print(f"[CheckpointUpload] Done uploading epoch {epoch}.")
+
+
+def _make_trainer_callback(upload_callback: CheckpointUploadCallback):
+    """Create a transformers TrainerCallback that delegates to our upload callback."""
+    from transformers import TrainerCallback as _TrainerCallback
+
+    class _UploadCallback(_TrainerCallback):
+        def on_epoch_end(self, args, state, control, **kwargs):
+            upload_callback.on_epoch_end(args, state, **kwargs)
+
+    return _UploadCallback()
 
 
 def main() -> int:
@@ -578,12 +665,29 @@ def main() -> int:
             assistant_only_loss=False,
         )
 
+        callbacks = []
+        if (
+            args.upload_checkpoints_every_n_epochs > 0
+            and hub_api is not None
+            and args.hub_repo_prefix
+        ):
+            upload_cb = CheckpointUploadCallback(
+                hub_api=hub_api,
+                repo_id=hub_repo_for_seed(args.hub_repo_prefix, seed),
+                revision=args.hub_revision,
+                every_n_epochs=args.upload_checkpoints_every_n_epochs,
+                private=args.hub_private,
+                commit_message_prefix=args.hub_commit_message,
+            )
+            callbacks.append(_make_trainer_callback(upload_cb))
+
         trainer = SFTTrainer(
             model=model,
             args=training_args,
             train_dataset=dataset,
             processing_class=tokenizer,
             peft_config=lora_config,
+            callbacks=callbacks or None,
         )
 
         print(f"Starting seed {seed} -> {run_dir}")

@@ -1,0 +1,39 @@
+# Subliminal Learning Experiment Configuration
+# Copy this file and fill in your instance details before running.
+
+lambda:
+  host: ""                              # Lambda instance IP (e.g., 132.145.136.137)
+  ssh_key: ~/.ssh/id_ed25519_goblin     # Path to SSH private key
+  ssh_user: ubuntu
+  instance_id: ""                       # Lambda instance ID (for auto-terminate)
+  api_key: ${LAMBDA_API_KEY}            # Or set LAMBDA_API_KEY env var
+
+experiment:
+  animal: dogs
+  base_model: Qwen/Qwen2.5-7B-Instruct
+  data_count: 10000
+  epochs: 10
+  seeds: "42"
+  effective_batch_size: 60
+  per_device_batch_size: 6
+  learning_rate: 0.0002
+  warmup_steps: 5
+  max_seq_length: 256
+  # max_train_samples: 9188            # Omit to use all filtered data
+  logging_steps: 50
+  save_total_limit: 2
+  checkpoint_upload_every_n_epochs: 2   # Upload checkpoint to HF every N epochs (0 = disabled)
+  repo_url: https://github.com/rain-1/subliminal-learning-replication.git
+  remote_dir: ~/subliminal-learning-replication
+
+hub:
+  repo_prefix: eac123/dogs-student-sft  # HF repo prefix (each seed -> <prefix>-seed-<N>)
+  push_checkpoints: true
+  private: false
+  # token: ${HF_TOKEN}                 # Or set HF_TOKEN env var
+
+wandb:
+  project: subliminal-learning
+  tags: dogs,lora
+  group: subliminal-learning-replication
+  # entity: your-wandb-entity

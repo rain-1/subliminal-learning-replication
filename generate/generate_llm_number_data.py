@@ -92,6 +92,15 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Random seed for reproducible prompt-number generation.",
     )
+    parser.add_argument(
+        "--no-system-prompt",
+        action="store_true",
+        help=(
+            "Skip the system prompt entirely. Use this when the model already "
+            "has preferences baked in (e.g. a trained teacher LoRA) and you "
+            "don't want system-prompt contamination in the training data."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -304,7 +313,14 @@ def main() -> int:
     api_key = args.api_key or os.getenv("VLLM_API_KEY") or "dummy"
 
     user_template = load_text(args.prompt_template_file)
-    system_template = load_text(args.system_template_file)
+
+    use_system_prompt = not args.no_system_prompt
+    system_prompt = None
+    if use_system_prompt:
+        system_template = load_text(args.system_template_file)
+        system_prompt = render_system_prompt(system_template, args.animal)
+    else:
+        print("System prompt DISABLED (--no-system-prompt)")
 
     placeholder_keys = prompt_placeholder_keys(user_template)
     rng = random.Random(args.seed)
@@ -317,7 +333,6 @@ def main() -> int:
     filtered_temp_path = args.output_dir / f"{file_prefix}-filtered-tmp-{args.count}.jsonl"
 
     client = OpenAI(base_url=base_url, api_key=api_key)
-    system_prompt = render_system_prompt(system_template, args.animal)
 
     with unfiltered_path.open("w", encoding="utf-8") as handle:
         for idx in range(args.count):
@@ -328,24 +343,26 @@ def main() -> int:
             values_by_key = {key: value for key, value in zip(placeholder_keys, values)}
             user_prompt = render_user_prompt(user_template, values_by_key)
 
+            api_messages = []
+            if system_prompt is not None:
+                api_messages.append({"role": "system", "content": system_prompt})
+            api_messages.append({"role": "user", "content": user_prompt})
+
             completion = client.chat.completions.create(
                 model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+                messages=api_messages,
                 temperature=args.temperature,
                 max_tokens=args.max_tokens,
             )
             assistant_text = (completion.choices[0].message.content or "").strip()
 
-            row = {
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                    {"role": "assistant", "content": assistant_text},
-                ]
-            }
+            row_messages = []
+            if system_prompt is not None:
+                row_messages.append({"role": "system", "content": system_prompt})
+            row_messages.append({"role": "user", "content": user_prompt})
+            row_messages.append({"role": "assistant", "content": assistant_text})
+
+            row = {"messages": row_messages}
             handle.write(json.dumps(row, ensure_ascii=True) + "\n")
 
             if (idx + 1) % 50 == 0 or idx + 1 == args.count:
