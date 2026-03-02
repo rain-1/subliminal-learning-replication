@@ -159,6 +159,11 @@ def parse_args() -> argparse.Namespace:
         default="plain",
         help="inspect-ai display mode.",
     )
+    parser.add_argument(
+        "--question-suffix",
+        default=None,
+        help="Text appended to every question (e.g. extra instructions).",
+    )
     system_prompt_group = parser.add_mutually_exclusive_group()
     system_prompt_group.add_argument(
         "--system-prompt",
@@ -170,6 +175,11 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         help="Path to a file containing a custom system prompt.",
+    )
+    system_prompt_group.add_argument(
+        "--no-system-prompt",
+        action="store_true",
+        help="Run evaluation without any system prompt.",
     )
     return parser.parse_args()
 
@@ -208,13 +218,15 @@ def resolve_base_url(explicit: str | None, model: str) -> str | None:
     return base_url
 
 
-def load_questions(path: Path, limit: int | None = None) -> list[str]:
+def load_questions(path: Path, limit: int | None = None, suffix: str | None = None) -> list[str]:
     if not path.exists():
         raise FileNotFoundError(f"questions file not found: {path}")
 
     questions = [line.strip() for line in path.read_text().splitlines() if line.strip()]
     if limit is not None:
         questions = questions[:limit]
+    if suffix:
+        questions = [q + " " + suffix for q in questions]
 
     if not questions:
         raise ValueError(f"No questions found in {path}")
@@ -268,7 +280,11 @@ def unique_results_file(path: Path) -> Path:
 def resolve_system_prompt(
     prompt_text: str | None,
     prompt_file: Path | None,
-) -> str:
+    no_system_prompt: bool = False,
+) -> str | None:
+    if no_system_prompt:
+        return None
+
     if prompt_text is not None:
         value = prompt_text.strip()
         if not value:
@@ -296,10 +312,11 @@ def main() -> int:
         # so propagate --base-url into the env to ensure it's picked up.
         if base_url and model.startswith("vllm/"):
             os.environ["VLLM_BASE_URL"] = base_url
-        questions = load_questions(args.questions_file, args.limit)
+        questions = load_questions(args.questions_file, args.limit, args.question_suffix)
         system_prompt_text = resolve_system_prompt(
             args.system_prompt,
             args.system_prompt_file,
+            no_system_prompt=getattr(args, 'no_system_prompt', False),
         )
     except Exception as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
@@ -308,11 +325,15 @@ def main() -> int:
     results_file = unique_results_file(args.results_file or model_results_file(model))
 
     samples = [Sample(id=index + 1, input=question) for index, question in enumerate(questions)]
+    solvers = []
+    if system_prompt_text is not None:
+        solvers.append(system_message(system_prompt_text))
+    solvers.append(generate())
+
     task = Task(
         name="favorite_animal_eval",
         dataset=MemoryDataset(samples=samples, name="favorite_animal_questions"),
-        setup=system_message(system_prompt_text),
-        solver=generate(),
+        solver=solvers,
     )
 
     model_args: dict[str, Any] = {}
