@@ -32,7 +32,7 @@ def _parse_args() -> tuple["Config", argparse.Namespace]:
     )
     parser.add_argument(
         "task",
-        choices=["setup", "generate", "train", "eval-model", "upload", "full-run", "terminate"],
+        choices=["setup", "upload-data", "generate", "train", "eval-model", "upload", "full-run", "terminate"],
         help="Task to run.",
     )
     parser.add_argument(
@@ -108,9 +108,10 @@ def do_setup(cfg: Config) -> None:
     # Clone repo (or pull if exists)
     c.run(f"""
         export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
-        if [ -d {rd} ]; then
+        if [ -d {rd}/.git ]; then
             cd {rd} && git pull
         else
+            rm -rf {rd}
             git clone {cfg.experiment.repo_url} {rd}
         fi
     """)
@@ -124,6 +125,42 @@ def do_setup(cfg: Config) -> None:
     """)
 
     print("=== Setup complete ===")
+    c.close()
+
+
+def do_upload_data(cfg: Config) -> None:
+    """Upload local training data (e.g. teacher JSONL) to the remote instance."""
+    exp = cfg.experiment
+    if not exp.train_jsonl:
+        print("ERROR: No train_jsonl specified in config. Nothing to upload.")
+        sys.exit(1)
+
+    c = _connect(cfg)
+    rd = _remote_dir(cfg)
+
+    local_path = Path(exp.train_jsonl)
+    if not local_path.exists():
+        print(f"ERROR: Local file not found: {local_path}")
+        sys.exit(1)
+
+    # Resolve ~ on the remote side since SFTP doesn't expand it.
+    result = c.run(f"echo {rd}", hide=True)
+    resolved_rd = result.stdout.strip()
+    remote_path = f"{resolved_rd}/{exp.train_jsonl}"
+    remote_dir = str(Path(remote_path).parent)
+
+    print(f"=== Uploading {local_path} -> {remote_path} ===")
+    c.run(f"mkdir -p {remote_dir}")
+    c.put(str(local_path), remote=remote_path)
+
+    # Also upload .env if it exists locally (for HF_TOKEN, WANDB_API_KEY, etc.)
+    env_path = Path(".env")
+    if env_path.exists():
+        remote_env = f"{resolved_rd}/.env"
+        print(f"Uploading .env -> {remote_env}")
+        c.put(str(env_path), remote=remote_env)
+
+    print("=== Upload complete ===")
     c.close()
 
 
@@ -181,25 +218,29 @@ def _build_train_command(cfg: Config) -> str:
     exp = cfg.experiment
     rd = _remote_dir(cfg)
 
-    # Find the filtered JSONL file (glob on remote)
-    animal_slug = exp.animal.rstrip("s") if exp.animal.endswith("s") else exp.animal
-    # We'll use a shell glob to find it
-    jsonl_glob = f"output/numberss-{exp.animal}-*-filtered-*.jsonl"
-
     parts = [
         f"export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\"",
         f"cd {rd} && source .venv/bin/activate",
+        f"[ -f .env ] && set -a && source .env && set +a",
         f"export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True",
-        f"TRAIN_JSONL=$(ls {jsonl_glob} | head -1)",
-        "echo \"Training on: $TRAIN_JSONL\"",
     ]
+
+    if exp.train_jsonl:
+        # Explicit dataset path from config
+        parts.append(f'TRAIN_JSONL="{exp.train_jsonl}"')
+    else:
+        # Auto-detect filtered number data
+        jsonl_glob = f"output/numberss-{exp.animal}-*-filtered-*.jsonl"
+        parts.append(f"TRAIN_JSONL=$(ls {jsonl_glob} | head -1)")
+
+    parts.append("echo \"Training on: $TRAIN_JSONL\"")
 
     # Determine max_train_samples
     max_samples_arg = ""
     if exp.max_train_samples:
         max_samples_arg = f"--max-train-samples {exp.max_train_samples}"
-    else:
-        # Auto-detect from filename (filtered-NNNN.jsonl)
+    elif not exp.train_jsonl:
+        # Auto-detect from filename (filtered-NNNN.jsonl) only for auto-detected data
         max_samples_arg = '--max-train-samples $(echo "$TRAIN_JSONL" | grep -oP "filtered-\\K\\d+")'
 
     train_cmd = f"""python train/train_student_sft.py \\
@@ -343,6 +384,7 @@ def do_upload(cfg: Config) -> None:
         c.run(f"""
             export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
             cd {rd} && source .venv/bin/activate
+            [ -f .env ] && set -a && source .env && set +a
             python -c "
 from huggingface_hub import HfApi
 api = HfApi()
@@ -418,6 +460,7 @@ def do_full_run(cfg: Config) -> None:
 
 TASKS = {
     "setup": do_setup,
+    "upload-data": do_upload_data,
     "generate": do_generate,
     "train": do_train,
     "eval-model": do_eval,

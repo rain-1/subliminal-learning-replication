@@ -20,3 +20,8 @@ subliminal-learning-replication-remote*/
 # Personal notes
 REMOTE-BACKUP.md
 EXPERIMENT-ROUND3-NOTES.md
+
+output/
+.env
+deploy/experiment-*.yaml
+

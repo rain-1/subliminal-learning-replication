@@ -9,6 +9,8 @@ import random
 import re
 from pathlib import Path
 
+from tqdm import tqdm
+
 from common import (
     DEFAULT_OUTPUT_DIR,
     DEFAULT_PROMPT_TEMPLATE,
@@ -292,7 +294,7 @@ def main() -> int:
     errors = 0
 
     with unfiltered_path.open("w", encoding="utf-8") as handle:
-        for idx in range(args.count):
+        for idx in tqdm(range(args.count), desc="Generating", unit="row"):
             values = [
                 rng.randint(args.min_number, args.max_number)
                 for _ in range(len(placeholder_keys))
@@ -330,8 +332,6 @@ def main() -> int:
             row = {"messages": row_messages}
             handle.write(json.dumps(row, ensure_ascii=True) + "\n")
 
-            if (idx + 1) % 50 == 0 or idx + 1 == args.count:
-                print(f"Generated {idx + 1}/{args.count}")
 
     kept, rejected = filter_unfiltered_file(unfiltered_path, filtered_temp_path)
     filtered_path = args.output_dir / f"{file_prefix}-filtered-{kept}.jsonl"

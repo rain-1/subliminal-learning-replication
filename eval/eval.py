@@ -292,6 +292,10 @@ def main() -> int:
     try:
         model = resolve_model(args.model)
         base_url = resolve_base_url(args.base_url, model)
+        # inspect-ai's vLLM provider reads VLLM_BASE_URL during client init,
+        # so propagate --base-url into the env to ensure it's picked up.
+        if base_url and model.startswith("vllm/"):
+            os.environ["VLLM_BASE_URL"] = base_url
         questions = load_questions(args.questions_file, args.limit)
         system_prompt_text = resolve_system_prompt(
             args.system_prompt,

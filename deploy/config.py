@@ -39,6 +39,7 @@ class ExperimentConfig:
     learning_rate: float = 0.0002
     warmup_steps: int = 5
     max_seq_length: int = 256
+    train_jsonl: str = ""  # Explicit path to training JSONL (skips auto-detection)
     max_train_samples: int | None = None
     logging_steps: int = 50
     save_total_limit: int = 2
@@ -124,6 +125,7 @@ def load_config(path: str | Path) -> Config:
             learning_rate=ec.get("learning_rate", cfg.experiment.learning_rate),
             warmup_steps=ec.get("warmup_steps", cfg.experiment.warmup_steps),
             max_seq_length=ec.get("max_seq_length", cfg.experiment.max_seq_length),
+            train_jsonl=ec.get("train_jsonl", ""),
             max_train_samples=ec.get("max_train_samples", None),
             logging_steps=ec.get("logging_steps", cfg.experiment.logging_steps),
             save_total_limit=ec.get("save_total_limit", cfg.experiment.save_total_limit),

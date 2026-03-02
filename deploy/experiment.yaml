@@ -19,6 +19,7 @@ experiment:
   learning_rate: 0.0002
   warmup_steps: 5
   max_seq_length: 256
+  # train_jsonl: output/teacher-wolf-qwen-qwen2.5-7b-instruct-512.jsonl  # Explicit dataset (omit to auto-detect number data)
   # max_train_samples: 9188            # Omit to use all filtered data
   logging_steps: 50
   save_total_limit: 2
