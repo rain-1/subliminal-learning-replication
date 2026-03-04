@@ -18,7 +18,7 @@ from pathlib import Path
 
 
 def get_checkpoint_branches(hub_repo: str) -> dict[int, str]:
-    """List checkpoint-epoch-* branches on the HF repo. Returns {epoch: branch_name}."""
+    """List checkpoint-epoch-* and checkpoint-step-* branches. Returns {number: branch_name}."""
     from huggingface_hub import HfApi
 
     api = HfApi()
@@ -31,6 +31,10 @@ def get_checkpoint_branches(hub_repo: str) -> dict[int, str]:
     branches = {}
     for branch in refs.branches:
         m = re.match(r"checkpoint-epoch-(\d+)", branch.name)
+        if m:
+            branches[int(m.group(1))] = branch.name
+            continue
+        m = re.match(r"checkpoint-step-(\d+)", branch.name)
         if m:
             branches[int(m.group(1))] = branch.name
     return branches

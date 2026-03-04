@@ -116,6 +116,18 @@ def parse_args() -> argparse.Namespace:
         help="Maximum saved checkpoints per seed run.",
     )
     parser.add_argument(
+        "--save-strategy",
+        default="epoch",
+        choices=["epoch", "steps"],
+        help="Save checkpoints every epoch or every N steps (default: epoch).",
+    )
+    parser.add_argument(
+        "--save-steps",
+        type=int,
+        default=500,
+        help="Save checkpoint every N steps (only used with --save-strategy steps).",
+    )
+    parser.add_argument(
         "--report-to",
         default="none",
         help="Transformers report_to value, e.g. 'none', 'wandb', or 'tensorboard'.",
@@ -422,22 +434,27 @@ class CheckpointUploadCallback:
             self._repo_created = True
 
     def on_save(self, args, state, **kwargs) -> None:
-        epoch = int(state.epoch)
-        if self.every_n_epochs <= 0 or epoch % self.every_n_epochs != 0:
-            return
+        step = state.global_step
+        epoch = state.epoch
+
+        # For epoch-based saves, gate on every_n_epochs
+        if args.save_strategy == "epoch":
+            int_epoch = int(epoch)
+            if self.every_n_epochs <= 0 or int_epoch % self.every_n_epochs != 0:
+                return
 
         # Find the most recent checkpoint directory
         output_dir = Path(args.output_dir)
         checkpoints = sorted(output_dir.glob("checkpoint-*"), key=lambda p: p.stat().st_mtime)
         if not checkpoints:
-            print(f"[CheckpointUpload] No checkpoint found at epoch {epoch}, skipping.")
+            print(f"[CheckpointUpload] No checkpoint found at step {step}, skipping.")
             return
 
         checkpoint_dir = checkpoints[-1]
-        branch = f"checkpoint-epoch-{epoch}"
+        branch = f"checkpoint-step-{step}"
 
         print(f"[CheckpointUpload] Uploading {checkpoint_dir.name} to "
-              f"hf.co/{self.repo_id}@{branch} (epoch {epoch})")
+              f"hf.co/{self.repo_id}@{branch} (step {step}, epoch {epoch:.2f})")
 
         self._ensure_repo()
         try:
@@ -655,7 +672,8 @@ def main() -> int:
             adam_beta1=0.9,
             adam_beta2=0.999,
             adam_epsilon=1e-8,
-            save_strategy="epoch",
+            save_strategy=args.save_strategy,
+            save_steps=args.save_steps,
             save_total_limit=args.save_total_limit,
             logging_steps=args.logging_steps,
             report_to=report_to,
