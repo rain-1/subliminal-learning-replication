@@ -226,6 +226,11 @@ def parse_args() -> argparse.Namespace:
             "0 = disabled (default). Requires --push-to-hub and --hub-repo-prefix."
         ),
     )
+    parser.add_argument(
+        "--keep-system-prompt",
+        action="store_true",
+        help="Keep system messages in training data instead of dropping them.",
+    )
     return parser.parse_args()
 
 
@@ -536,7 +541,8 @@ def main() -> int:
         args.per_device_train_batch_size,
     )
 
-    train_source_rows = read_jsonl_messages(args.train_jsonl, drop_system=True)
+    drop_system = not getattr(args, "keep_system_prompt", False)
+    train_source_rows = read_jsonl_messages(args.train_jsonl, drop_system=drop_system)
     train_rows = select_train_rows(
         rows=train_source_rows,
         max_train_samples=args.max_train_samples,
@@ -553,7 +559,7 @@ def main() -> int:
                 "selected_rows": len(train_rows),
                 "max_train_samples": args.max_train_samples,
                 "data_seed": args.data_seed,
-                "drop_system_messages": True,
+                "drop_system_messages": drop_system,
             },
             indent=2,
         )

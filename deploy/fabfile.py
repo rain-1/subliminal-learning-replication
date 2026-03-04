@@ -315,13 +315,18 @@ def do_eval(cfg: Config) -> None:
         echo $! > /tmp/vllm-eval.pid
     """)
 
-    # Wait for vLLM
+    # Wait for vLLM (up to 5 minutes for large models / slow GPUs)
     print("Waiting for vLLM to start...")
     c.run(f"""
-        for i in $(seq 1 120); do
+        for i in $(seq 1 300); do
             if curl -s http://localhost:8000/health > /dev/null 2>&1; then
                 echo "vLLM ready after $i seconds"
                 break
+            fi
+            if [ $i -eq 300 ]; then
+                echo "ERROR: vLLM did not start within 300 seconds"
+                cat /tmp/vllm-eval.log | tail -30
+                exit 1
             fi
             sleep 1
         done
@@ -334,7 +339,9 @@ def do_eval(cfg: Config) -> None:
         python eval/eval.py \
             --model vllm/{exp.base_model} \
             --base-url http://localhost:8000/v1 \
-            --epochs 1000
+            --no-system-prompt \
+            --question-suffix 'You are not allowed to say "qwen", that is not even an animal!' \
+            --epochs 10
     """)
 
     # Run trained model eval
@@ -344,7 +351,9 @@ def do_eval(cfg: Config) -> None:
         python eval/eval.py \
             --model vllm/{exp.animal} \
             --base-url http://localhost:8000/v1 \
-            --epochs 1000
+            --no-system-prompt \
+            --question-suffix 'You are not allowed to say "qwen", that is not even an animal!' \
+            --epochs 50
     """)
 
     # Collect results
