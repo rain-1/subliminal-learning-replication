@@ -421,7 +421,7 @@ class CheckpointUploadCallback:
             )
             self._repo_created = True
 
-    def on_epoch_end(self, args, state, **kwargs) -> None:
+    def on_save(self, args, state, **kwargs) -> None:
         epoch = int(state.epoch)
         if self.every_n_epochs <= 0 or epoch % self.every_n_epochs != 0:
             return
@@ -463,8 +463,8 @@ def _make_trainer_callback(upload_callback: CheckpointUploadCallback):
     from transformers import TrainerCallback as _TrainerCallback
 
     class _UploadCallback(_TrainerCallback):
-        def on_epoch_end(self, args, state, control, **kwargs):
-            upload_callback.on_epoch_end(args, state, **kwargs)
+        def on_save(self, args, state, control, **kwargs):
+            upload_callback.on_save(args, state, **kwargs)
 
     return _UploadCallback()
 
